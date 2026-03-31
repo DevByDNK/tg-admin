@@ -151,8 +151,67 @@ const CHANNEL_KEYS = Object.keys(CHANNEL_LABELS);
 function defaultPostState() {
     return {
         channels: { en: false, ua: false, ru: false, pl: false, de: false, main: false },
+        photos: { en: null, ua: null, ru: null, pl: null, de: null, main: null },
+        translations: {},
         awaiting_post_text: false,
+        awaiting_photo_for: null,
     };
+}
+
+async function showPhotoMenu(ctx) {
+    const activeKeys = CHANNEL_KEYS.filter(k => ctx.session.channels[k]);
+    let text = 'Текст переведен. Можешь добавить фото для каждого канала по отдельности (нажми на кнопку и отправь фото):\n\n';
+    const rows = [];
+    for (const key of activeKeys) {
+        const hasPhoto = ctx.session.photos[key] ? '🖼 ✅' : '❌ Нет фото';
+        text += `${CHANNEL_LABELS[key]}: ${hasPhoto}\n`;
+        rows.push([Markup.button.callback(`${CHANNEL_LABELS[key]}: ${ctx.session.photos[key] ? 'Изменить фото' : 'Добавить фото'}`, `add_photo_${key}`)]);
+    }
+    rows.push([Markup.button.callback('🚀 Отправить всё', 'final_send')]);
+    rows.push([Markup.button.callback('Отмена', 'cmd_back')]);
+    await ui(ctx, text, Markup.inlineKeyboard(rows));
+}
+
+async function sendFinalPosts(ctx) {
+    const activeKeys = CHANNEL_KEYS.filter(k => ctx.session.channels[k]);
+    const translations = ctx.session.translations || {};
+    const photos = ctx.session.photos || {};
+    const sourceText = ctx.session.sourceText || '';
+    
+    const postId = Date.now();
+    const data = loadStats();
+    data.posts.push({ id: postId, date: new Date().toISOString(), channels: activeKeys, text: sourceText.slice(0, 80), views: {}, messageIds: {} });
+    saveStats(data);
+
+    let successCount = 0;
+    for (const key of activeKeys) {
+        const text = translations[key];
+        if (!text) continue;
+        const channelId = CHANNEL_IDS[key];
+        if (!channelId) continue;
+        
+        try {
+            let sent;
+            if (photos[key]) {
+                sent = await bot.telegram.sendPhoto(channelId, photos[key], { caption: text });
+            } else {
+                sent = await bot.telegram.sendMessage(channelId, text);
+            }
+            
+            const fresh = loadStats();
+            const post = fresh.posts.find(p => p.id === postId);
+            if (post) { 
+                post.messageIds[key] = sent.message_id; 
+                saveStats(fresh); 
+            }
+            successCount++;
+        } catch (sendErr) {
+            console.error(`Error sending to ${key}:`, sendErr);
+        }
+    }
+    
+    await ui(ctx, `Успешно отправлено в ${successCount} каналов. Через 1 час запусти /updateviews для статистики.`, bKb);
+    Object.assign(ctx.session, defaultPostState());
 }
 
 function buildChannelKeyboard(channels) {
