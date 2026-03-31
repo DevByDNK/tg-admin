@@ -89,4 +89,4 @@ The bot implements a structured logging system. All errors are prefixed with err
 1. Clone the repository.
 2. Run npm install.
 3. Create a .env file based on the provided configuration.
-4. Start the bot: node index.js.
+4. Start the bot: node index.js
